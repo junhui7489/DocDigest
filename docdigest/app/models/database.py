@@ -11,9 +11,9 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings
 
-# Use SSL for non-local database connections (e.g. Railway)
+# Enable SSL for cloud-hosted Postgres (e.g. Railway)
 _connect_args = {}
-if "localhost" not in settings.async_database_url and "127.0.0.1" not in settings.async_database_url:
+if settings.database_ssl:
     _ssl_ctx = ssl.create_default_context()
     _ssl_ctx.check_hostname = False
     _ssl_ctx.verify_mode = ssl.CERT_NONE
