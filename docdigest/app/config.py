@@ -27,6 +27,16 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://postgres:password@localhost:5432/docdigest"
     )
 
+    @property
+    def async_database_url(self) -> str:
+        """Return database URL with asyncpg driver, correcting Railway's scheme."""
+        url = self.database_url
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return url
+
     # --- Redis ---
     redis_url: str = "redis://localhost:6379/0"
 
