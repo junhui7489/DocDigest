@@ -7,11 +7,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import shutil
-import time
+import os
 from uuid import UUID
-
-logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
@@ -35,6 +32,7 @@ from app.models.schemas import (
 from app.services.qa_engine import answer_question, answer_question_stream
 from app.services.summariser import stream_summary_text
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 ALLOWED_TYPES = {
@@ -58,7 +56,7 @@ async def upload_document(
     db: AsyncSession = Depends(get_db),
 ):
     """Upload a document and start async processing."""
-    logger.info("Upload started: %s", file.filename)
+    logger.info("Upload started: %s (%s)", file.filename, file.content_type)
 
     # Validate file type
     content_type = file.content_type or ""
@@ -72,24 +70,18 @@ async def upload_document(
             detail=f"Unsupported file type: {content_type}. "
             f"Supported: PDF, EPUB, DOCX, TXT.",
         )
-    logger.info("File type validated: %s", file_type)
 
     # Save file to disk
-    logger.info("Ensuring upload dir...")
     upload_dir = settings.ensure_upload_dir()
-    logger.info("Reading file content...")
     content = await file.read()
-    logger.info("File read: %d bytes", len(content))
     file_hash = hashlib.sha256(content).hexdigest()[:12]
     safe_name = f"{file_hash}_{file.filename}"
     dest_path = upload_dir / safe_name
 
     with open(dest_path, "wb") as f:
         f.write(content)
-    logger.info("File saved to: %s", dest_path)
 
     # Create database record
-    logger.info("Creating DB record...")
     doc = Document(
         filename=file.filename or "unknown",
         file_path=str(dest_path),
@@ -98,14 +90,12 @@ async def upload_document(
         status=ProcessingStatus.PENDING,
     )
     db.add(doc)
-    logger.info("Flushing to DB...")
     await db.flush()
     doc_id = str(doc.id)
-    logger.info("DB record created: %s", doc_id)
 
     # Dispatch background task
     background_tasks.add_task(_run_processing, doc_id)
-    logger.info("Background task scheduled.")
+    logger.info("Upload complete: %s (%s, %d bytes)", doc_id[:8], file_type, len(content))
 
     return DocumentResponse(
         document_id=doc_id,
@@ -363,14 +353,16 @@ async def delete_document(
 ):
     """Delete a document and all associated data."""
     doc = await _get_document_or_404(db, doc_id)
+    file_path = doc.file_path
 
-    # Remove file from disk
-    import os
-    if os.path.exists(doc.file_path):
-        os.remove(doc.file_path)
-
+    # Delete DB record first, then clean up file
     await db.delete(doc)
-    return {"deleted": True, "document_id": str(doc.id)}
+    await db.flush()
+
+    if os.path.exists(file_path):
+        os.remove(file_path)
+
+    return {"deleted": True, "document_id": str(doc_id)}
 
 
 # ---------------------------------------------------------------------------

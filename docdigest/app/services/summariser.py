@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
 import anthropic
@@ -341,6 +342,3 @@ async def stream_summary_text(
         await asyncio.sleep(0.04)
 
     yield "event: done\ndata: {}\n\n"
-
-
-from collections.abc import AsyncGenerator

@@ -9,6 +9,7 @@ In production:
   - Both API and UI served from the same origin
 """
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -22,6 +23,9 @@ from app.config import settings
 from app.models.database import engine, Base
 from app.routers import documents
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Path to the built frontend (created by `npm run build` in frontend/)
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
@@ -29,27 +33,20 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
-    import logging
-    logging.basicConfig(level=logging.INFO)
-    _logger = logging.getLogger(__name__)
-
-    # Startup: ensure upload directory exists
     settings.ensure_upload_dir()
 
-    # Startup: enable pgvector and create database tables
     try:
-        _logger.info("Connecting to database...")
+        logger.info("Connecting to database...")
         async with engine.begin() as conn:
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             await conn.run_sync(Base.metadata.create_all)
-        _logger.info("Database tables created successfully.")
+        logger.info("Database tables created successfully.")
     except Exception as e:
-        _logger.error("Database initialization failed: %s", e)
+        logger.error("Database initialization failed: %s", e)
         raise
 
     yield
 
-    # Shutdown: dispose database engine
     await engine.dispose()
 
 
@@ -61,8 +58,6 @@ app = FastAPI(
 )
 
 # --- CORS ---
-# Origins are comma-separated in ALLOWED_ORIGINS env var.
-# Defaults to localhost for dev; set to Vercel URL in production.
 _origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -83,34 +78,17 @@ app.include_router(
 @app.get("/health")
 async def health_check():
     """Health check that verifies database connectivity."""
-    import os
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
-        return {
-            "status": "healthy",
-            "version": "0.1.0",
-            "db": "connected",
-            "db_url_prefix": settings.async_database_url[:30] + "...",
-            "port": os.environ.get("PORT", "not set"),
-        }
+        return {"status": "healthy", "version": "0.1.0", "db": "connected"}
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).error("Health check DB failure: %s", e)
-        return {
-            "status": "degraded",
-            "version": "0.1.0",
-            "db": str(e),
-            "db_url_prefix": settings.async_database_url[:30] + "...",
-            "port": os.environ.get("PORT", "not set"),
-        }
+        logger.error("Health check DB failure: %s", e)
+        return {"status": "degraded", "version": "0.1.0", "db": str(e)}
 
 
 # --- Serve built frontend (production) ---
-# Mount static assets (JS/CSS/images) if the build exists.
-# The catch-all route below serves index.html for client-side routing.
 if FRONTEND_DIR.exists():
-    # Serve /assets/* directly
     assets_dir = FRONTEND_DIR / "assets"
     if assets_dir.exists():
         app.mount(
@@ -121,13 +99,8 @@ if FRONTEND_DIR.exists():
 
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
-        """Serve the frontend SPA.
-
-        - If the requested file exists in the build directory, serve it.
-        - Otherwise, serve index.html (for client-side routing).
-        """
+        """Serve the frontend SPA."""
         file_path = FRONTEND_DIR / full_path
         if file_path.is_file():
             return FileResponse(str(file_path))
-        # Fall back to index.html for SPA routing
         return FileResponse(str(FRONTEND_DIR / "index.html"))

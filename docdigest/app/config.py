@@ -37,9 +37,6 @@ class Settings(BaseSettings):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         return url
 
-    # --- Redis ---
-    redis_url: str = "redis://localhost:6379/0"
-
     # --- File storage ---
     upload_dir: Path = Path("./uploads")
 

@@ -11,9 +11,9 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings
 
-# Railway Postgres requires SSL for connections
+# Use SSL for non-local database connections (e.g. Railway)
 _connect_args = {}
-if "railway" in settings.async_database_url or "localhost" not in settings.async_database_url:
+if "localhost" not in settings.async_database_url and "127.0.0.1" not in settings.async_database_url:
     _ssl_ctx = ssl.create_default_context()
     _ssl_ctx.check_hostname = False
     _ssl_ctx.verify_mode = ssl.CERT_NONE
@@ -49,5 +49,3 @@ async def get_db() -> AsyncSession:
         except Exception:
             await session.rollback()
             raise
-        finally:
-            await session.close()
