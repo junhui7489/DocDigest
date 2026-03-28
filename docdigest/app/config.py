@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # --- Q&A ---
     qa_top_k: int = 5
 
+    # --- CORS ---
+    allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
     # --- Optional ---
     tesseract_cmd: str | None = None
 

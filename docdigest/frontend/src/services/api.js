@@ -6,7 +6,7 @@
  * In prod, FastAPI serves the built frontend at the same origin.
  */
 
-const BASE = "/api/v1/documents";
+const BASE = `${import.meta.env.VITE_API_URL || ""}/api/v1/documents`;
 
 class ApiError extends Error {
   constructor(status, detail) {
