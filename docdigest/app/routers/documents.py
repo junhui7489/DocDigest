@@ -13,13 +13,13 @@ from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.database import get_db
+from app.models.database import async_session, get_db
 from app.models.schemas import (
     Document,
     DocumentListItem,
@@ -34,7 +34,6 @@ from app.models.schemas import (
 )
 from app.services.qa_engine import answer_question, answer_question_stream
 from app.services.summariser import stream_summary_text
-from app.worker import process_document_task
 
 router = APIRouter()
 
@@ -46,9 +45,16 @@ ALLOWED_TYPES = {
 }
 
 
+async def _run_processing(doc_id: str):
+    """Run the document processing pipeline as a background task."""
+    from app.worker import _process_document_async
+    await _process_document_async(doc_id)
+
+
 @router.post("/upload", response_model=DocumentResponse)
 async def upload_document(
     file: UploadFile,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     """Upload a document and start async processing."""
@@ -89,14 +95,7 @@ async def upload_document(
     doc_id = str(doc.id)
 
     # Dispatch background task
-    try:
-        process_document_task.delay(doc_id)
-    except Exception as e:
-        logger.error("Failed to dispatch processing task: %s", e)
-        raise HTTPException(
-            status_code=503,
-            detail=f"Document saved but processing queue unavailable: {e}",
-        )
+    background_tasks.add_task(_run_processing, doc_id)
 
     return DocumentResponse(
         document_id=doc_id,
