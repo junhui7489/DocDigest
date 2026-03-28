@@ -47,8 +47,8 @@ ALLOWED_TYPES = {
 
 async def _run_processing(doc_id: str):
     """Run the document processing pipeline as a background task."""
-    from app.worker import _process_document_async
-    await _process_document_async(doc_id)
+    from app.services.pipeline import process_document_async
+    await process_document_async(doc_id)
 
 
 @router.post("/upload", response_model=DocumentResponse)
