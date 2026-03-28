@@ -1,7 +1,7 @@
 """Document processing pipeline.
 
 Runs the full pipeline: parse → chunk → summarise → embed → store.
-Separated from worker.py to avoid Celery/Redis dependency at import time.
+Executed as a FastAPI BackgroundTask after document upload.
 """
 
 from __future__ import annotations
