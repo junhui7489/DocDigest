@@ -8,11 +8,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY docdigest/requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-COPY app/ app/
-COPY scripts/ scripts/
+COPY docdigest/app/ app/
+COPY docdigest/scripts/ scripts/
 
 RUN mkdir -p /app/uploads
 
