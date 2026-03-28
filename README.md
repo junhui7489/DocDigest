@@ -7,8 +7,9 @@ A full-stack application that ingests large books, research papers, legal contra
 - **Multi-format ingestion** — PDF, EPUB, DOCX, and plain text with OCR fallback
 - **Hierarchical summaries** — Executive brief → Key takeaways → Chapter summaries → Section summaries
 - **Follow-up Q&A** — Ask questions grounded in the actual source text with page citations
-- **Async processing** — Upload returns immediately; a Celery worker handles the pipeline in the background
+- **Async processing** — Upload returns immediately; a background task handles the pipeline
 - **Model routing** — Uses Sonnet for chunk summaries, Opus for synthesis (configurable)
+- **Streaming responses** — Real-time SSE streaming for summaries and Q&A answers
 - **Export** — Download summaries as Markdown
 - **Chatbot interface** — Conversational UI: upload, summaries, and Q&A all within a single chat
 
@@ -24,21 +25,21 @@ A full-stack application that ingests large books, research papers, legal contra
 │  └──────────────────────────┬─────────────────────────────────┘ │
 └─────────────────────────────┼───────────────────────────────────┘
                               │ /api/v1/documents/*
-┌──────────────────────────┼───────────────────────┼──────────────┐
-│  Backend (FastAPI)       │                       │              │
-│  ┌───────────────────────▼───────────────────────▼────────────┐ │
-│  │ REST API: upload, status, summary, ask, export, list       │ │
-│  └───────────────────────┬────────────────────────────────────┘ │
-│                          │ Celery task                          │
-│  ┌───────────────────────▼────────────────────────────────────┐ │
-│  │ Pipeline: Parse → Chunk → Summarise (Claude) → Embed      │ │
-│  └────────────────────────────────────────────────────────────┘ │
-│                                                                 │
-│  ┌─────────────────┐  ┌──────────────┐  ┌───────────────────┐  │
-│  │ PostgreSQL +    │  │ Redis        │  │ Anthropic Claude  │  │
-│  │ pgvector        │  │ (task queue) │  │ API               │  │
-│  └─────────────────┘  └──────────────┘  └───────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────┼───────────────────────────────────┐
+│  Backend (FastAPI)          │                                    │
+│  ┌──────────────────────────▼───────────────────────────────────┐│
+│  │ REST API: upload, status, summary, ask, export, list, delete ││
+│  └──────────────────────────┬───────────────────────────────────┘│
+│                             │ BackgroundTasks                    │
+│  ┌──────────────────────────▼───────────────────────────────────┐│
+│  │ Pipeline: Parse → Chunk → Summarise (Claude) → Embed → Store││
+│  └──────────────────────────────────────────────────────────────┘│
+│                                                                  │
+│  ┌──────────────────────┐  ┌─────────────────────────────────┐  │
+│  │ PostgreSQL + pgvector│  │ Anthropic Claude + Voyage AI    │  │
+│  │ (data + vectors)     │  │ (summaries + embeddings)        │  │
+│  └──────────────────────┘  └─────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ## Project Structure
@@ -48,13 +49,13 @@ docdigest/
 ├── app/                          # Python backend
 │   ├── main.py                   # FastAPI entry (serves API + built frontend)
 │   ├── config.py                 # Settings from environment
-│   ├── worker.py                 # Celery tasks (full processing pipeline)
 │   ├── models/
 │   │   ├── database.py           # SQLAlchemy async engine + session
 │   │   └── schemas.py            # ORM models + Pydantic request/response schemas
 │   ├── routers/
 │   │   └── documents.py          # All REST endpoints
 │   └── services/
+│       ├── pipeline.py           # Document processing pipeline (BackgroundTask)
 │       ├── parser.py             # PDF / EPUB / DOCX / TXT parser with OCR
 │       ├── chunker.py            # Structure-aware text chunking
 │       ├── summariser.py         # Hierarchical map-reduce summarisation
@@ -80,7 +81,9 @@ docdigest/
 │   ├── test_chunker.py
 │   └── test_summariser.py
 ├── Dockerfile                    # Multi-stage: build frontend + Python app
-├── docker-compose.yml            # Full stack: db + redis + api + worker
+├── Dockerfile.backend            # Backend-only (used by Railway)
+├── docker-compose.yml            # Local dev: db + api
+├── railway.toml                  # Railway deployment config
 ├── .env.example
 ├── .dockerignore
 ├── requirements.txt
@@ -96,7 +99,7 @@ The fastest way to run the full stack with one command.
 ```bash
 # 1. Copy and configure environment
 cp .env.example .env
-# Edit .env — at minimum set ANTHROPIC_API_KEY
+# Edit .env — set ANTHROPIC_API_KEY and VOYAGE_API_KEY
 
 # 2. Launch everything
 docker compose up --build
@@ -105,13 +108,13 @@ docker compose up --build
 open http://localhost:8000
 ```
 
-This starts PostgreSQL (with pgvector), Redis, the FastAPI server, and the Celery worker. The frontend is built during the Docker image build and served by FastAPI.
+This starts PostgreSQL (with pgvector) and the FastAPI server. The frontend is built during the Docker image build and served by FastAPI.
 
 ### Option B: Local development (separate terminals)
 
 For active development with hot reload on both frontend and backend.
 
-**Prerequisites:** Python 3.11+, Node.js 18+, PostgreSQL 15+ (with pgvector), Redis.
+**Prerequisites:** Python 3.11+, Node.js 18+, PostgreSQL 15+ (with pgvector).
 
 ```bash
 # 1. Backend setup
@@ -132,19 +135,13 @@ cd frontend
 npm install
 cd ..
 
-# 4. Start services (four terminals)
+# 4. Start services (two terminals)
 
 # Terminal 1 — Backend API (port 8000)
 uvicorn app.main:app --reload --port 8000
 
-# Terminal 2 — Celery worker
-celery -A app.worker worker --loglevel=info --concurrency=4
-
-# Terminal 3 — Frontend dev server (port 3000, proxies /api → 8000)
+# Terminal 2 — Frontend dev server (port 3000, proxies /api → 8000)
 cd frontend && npm run dev
-
-# Terminal 4 (optional) — Celery Flower monitoring
-celery -A app.worker flower --port=5555
 ```
 
 In dev mode, open **http://localhost:3000** (Vite dev server with hot reload).
@@ -159,12 +156,35 @@ cd frontend && npm install && npm run build && cd ..
 
 # Start API (serves both API + built frontend)
 uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-# Start worker (separate process)
-celery -A app.worker worker --loglevel=info --concurrency=4
 ```
 
 Open **http://localhost:8000** — FastAPI serves the React app and API from the same origin.
+
+## Deployment
+
+### Railway (Backend)
+
+The backend is deployed on Railway using `Dockerfile.backend` and configured via `railway.toml`.
+
+**Required environment variables on Railway:**
+| Variable              | Value                                     |
+| --------------------- | ----------------------------------------- |
+| `DATABASE_URL`        | `${{Postgres.DATABASE_URL}}` (Railway ref)|
+| `DATABASE_SSL`        | `true`                                    |
+| `ANTHROPIC_API_KEY`   | Your Anthropic API key                    |
+| `VOYAGE_API_KEY`      | Your Voyage AI API key                    |
+| `ALLOWED_ORIGINS`     | Your Vercel frontend URL                  |
+
+**Networking:** Ensure the public domain port matches the app's listening port (Railway sets `PORT` automatically, typically `8080`).
+
+### Vercel (Frontend)
+
+The frontend is deployed on Vercel as a static site.
+
+**Required environment variable on Vercel:**
+| Variable       | Value                                          |
+| -------------- | ---------------------------------------------- |
+| `VITE_API_URL` | Railway backend URL (no trailing slash)         |
 
 ## Frontend ↔ Backend Integration
 
@@ -178,6 +198,7 @@ The frontend communicates through a typed API client (`frontend/src/services/api
 | `getStatus(id)`           | `GET /api/v1/documents/{id}/status`      | `documents.get_status`        |
 | `getSummary(id, level)`   | `GET /api/v1/documents/{id}/summary`     | `documents.get_summary`       |
 | `askQuestion(id, q)`      | `POST /api/v1/documents/{id}/ask`        | `documents.ask`               |
+| `askQuestionStream(id, q)`| `POST /api/v1/documents/{id}/ask/stream` | `documents.ask_stream`        |
 | `exportSummary(id, lvl)`  | `GET /api/v1/documents/{id}/export`      | `documents.export_summary`    |
 | `listDocuments()`         | `GET /api/v1/documents`                  | `documents.list_documents`    |
 | `deleteDocument(id)`      | `DELETE /api/v1/documents/{id}`          | `documents.delete_document`   |
@@ -205,8 +226,9 @@ All settings in `app/config.py`, overridable via `.env`:
 | Variable              | Default                      | Description                         |
 | --------------------- | ---------------------------- | ----------------------------------- |
 | `ANTHROPIC_API_KEY`   | —                            | Your Anthropic API key              |
+| `VOYAGE_API_KEY`      | —                            | Your Voyage AI API key              |
 | `DATABASE_URL`        | `postgresql+asyncpg://...`   | PostgreSQL connection string        |
-| `REDIS_URL`           | `redis://localhost:6379/0`   | Redis connection string             |
+| `DATABASE_SSL`        | `false`                      | Enable SSL for cloud Postgres       |
 | `UPLOAD_DIR`          | `./uploads`                  | Where uploaded files are stored     |
 | `CHUNK_TARGET_TOKENS` | `1000`                       | Target tokens per chunk             |
 | `CHUNK_OVERLAP_TOKENS`| `100`                        | Overlap tokens between chunks       |
@@ -214,6 +236,7 @@ All settings in `app/config.py`, overridable via `.env`:
 | `SYNTHESIS_MODEL`     | `claude-opus-4-20250514`     | Model for merge / synthesis steps   |
 | `EMBEDDING_MODEL`     | `voyage-3`                   | Embedding model for vector search   |
 | `QA_TOP_K`            | `5`                          | Chunks retrieved for RAG answers    |
+| `ALLOWED_ORIGINS`     | `http://localhost:3000,...`   | CORS allowed origins (comma-sep)    |
 
 ## License
 
