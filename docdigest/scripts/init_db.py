@@ -31,7 +31,6 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
         logger.info("All tables created successfully.")
 
-    await engine.dispose()
     logger.info("Database initialisation complete.")
 
 
