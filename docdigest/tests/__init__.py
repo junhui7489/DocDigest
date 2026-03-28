@@ -1,0 +1,1 @@
+"""DocDigest test suite."""
