@@ -58,11 +58,12 @@ async def upload_document(
     db: AsyncSession = Depends(get_db),
 ):
     """Upload a document and start async processing."""
+    logger.info("Upload started: %s", file.filename)
+
     # Validate file type
     content_type = file.content_type or ""
     file_type = ALLOWED_TYPES.get(content_type)
     if not file_type:
-        # Fall back to extension
         ext = (file.filename or "").rsplit(".", 1)[-1].lower()
         file_type = ext if ext in ("pdf", "epub", "docx", "txt") else None
     if not file_type:
@@ -71,18 +72,24 @@ async def upload_document(
             detail=f"Unsupported file type: {content_type}. "
             f"Supported: PDF, EPUB, DOCX, TXT.",
         )
+    logger.info("File type validated: %s", file_type)
 
     # Save file to disk
+    logger.info("Ensuring upload dir...")
     upload_dir = settings.ensure_upload_dir()
+    logger.info("Reading file content...")
     content = await file.read()
+    logger.info("File read: %d bytes", len(content))
     file_hash = hashlib.sha256(content).hexdigest()[:12]
     safe_name = f"{file_hash}_{file.filename}"
     dest_path = upload_dir / safe_name
 
     with open(dest_path, "wb") as f:
         f.write(content)
+    logger.info("File saved to: %s", dest_path)
 
     # Create database record
+    logger.info("Creating DB record...")
     doc = Document(
         filename=file.filename or "unknown",
         file_path=str(dest_path),
@@ -91,11 +98,14 @@ async def upload_document(
         status=ProcessingStatus.PENDING,
     )
     db.add(doc)
+    logger.info("Flushing to DB...")
     await db.flush()
     doc_id = str(doc.id)
+    logger.info("DB record created: %s", doc_id)
 
     # Dispatch background task
     background_tasks.add_task(_run_processing, doc_id)
+    logger.info("Background task scheduled.")
 
     return DocumentResponse(
         document_id=doc_id,
