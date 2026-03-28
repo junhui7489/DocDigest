@@ -17,6 +17,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+from sqlalchemy import text
+
 from app.config import settings
 from app.models.database import engine, Base
 from app.routers import documents
@@ -31,8 +33,11 @@ async def lifespan(app: FastAPI):
     # Startup: ensure upload directory exists
     settings.ensure_upload_dir()
 
-    # Startup: create database tables (use Alembic in production)
+    # Startup: initialise database — enable pgvector and create all tables.
+    # Doing this inside the lifespan keeps the engine alive for the app's
+    # lifetime, which is required for the healthcheck probe to succeed.
     async with engine.begin() as conn:
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
 
     yield
