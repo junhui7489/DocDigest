@@ -1,9 +1,13 @@
-"""Database initialisation script.
+"""Database initialisation utility script.
+
+This script is provided for manual / one-off database setup (e.g. local dev
+or emergency re-initialisation). It is NOT used during normal application
+startup — database initialisation is handled by the FastAPI lifespan context
+manager in app/main.py so that the engine remains alive for the duration of
+the process.
 
 Usage:
     python -m scripts.init_db
-
-Creates all tables and enables the pgvector extension.
 """
 
 import asyncio
