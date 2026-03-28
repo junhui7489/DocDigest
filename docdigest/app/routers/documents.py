@@ -6,9 +6,12 @@ Includes SSE streaming endpoints for real-time response delivery.
 from __future__ import annotations
 
 import hashlib
+import logging
 import shutil
 import time
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
@@ -86,7 +89,14 @@ async def upload_document(
     doc_id = str(doc.id)
 
     # Dispatch background task
-    process_document_task.delay(doc_id)
+    try:
+        process_document_task.delay(doc_id)
+    except Exception as e:
+        logger.error("Failed to dispatch processing task: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Document saved but processing queue unavailable: {e}",
+        )
 
     return DocumentResponse(
         document_id=doc_id,
