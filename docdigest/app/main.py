@@ -30,6 +30,7 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     import logging
+    logging.basicConfig(level=logging.INFO)
     _logger = logging.getLogger(__name__)
 
     # Startup: ensure upload directory exists
@@ -82,14 +83,27 @@ app.include_router(
 @app.get("/health")
 async def health_check():
     """Health check that verifies database connectivity."""
+    import os
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
-        return {"status": "healthy", "version": "0.1.0", "db": "connected"}
+        return {
+            "status": "healthy",
+            "version": "0.1.0",
+            "db": "connected",
+            "db_url_prefix": settings.async_database_url[:30] + "...",
+            "port": os.environ.get("PORT", "not set"),
+        }
     except Exception as e:
         import logging
         logging.getLogger(__name__).error("Health check DB failure: %s", e)
-        return {"status": "degraded", "version": "0.1.0", "db": str(e)}
+        return {
+            "status": "degraded",
+            "version": "0.1.0",
+            "db": str(e),
+            "db_url_prefix": settings.async_database_url[:30] + "...",
+            "port": os.environ.get("PORT", "not set"),
+        }
 
 
 # --- Serve built frontend (production) ---
