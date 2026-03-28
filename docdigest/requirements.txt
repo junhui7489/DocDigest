@@ -16,11 +16,6 @@ asyncpg==0.30.0
 pgvector==0.3.6
 alembic==1.14.1
 
-# Task queue
-celery[redis]==5.4.0
-redis==5.2.1
-flower==2.0.1
-
 # LLM
 anthropic==0.42.0
 

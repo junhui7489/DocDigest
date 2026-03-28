@@ -29,13 +29,22 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
+    import logging
+    _logger = logging.getLogger(__name__)
+
     # Startup: ensure upload directory exists
     settings.ensure_upload_dir()
 
     # Startup: enable pgvector and create database tables
-    async with engine.begin() as conn:
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        await conn.run_sync(Base.metadata.create_all)
+    try:
+        _logger.info("Connecting to database...")
+        async with engine.begin() as conn:
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            await conn.run_sync(Base.metadata.create_all)
+        _logger.info("Database tables created successfully.")
+    except Exception as e:
+        _logger.error("Database initialization failed: %s", e)
+        raise
 
     yield
 
@@ -72,7 +81,15 @@ app.include_router(
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "version": "0.1.0"}
+    """Health check that verifies database connectivity."""
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return {"status": "healthy", "version": "0.1.0", "db": "connected"}
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error("Health check DB failure: %s", e)
+        return {"status": "degraded", "version": "0.1.0", "db": str(e)}
 
 
 # --- Serve built frontend (production) ---
